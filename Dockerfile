@@ -1,4 +1,4 @@
-FROM rust:1.76-slim-bookworm AS builder
+FROM rust:1.85-slim-bookworm AS builder
 
 WORKDIR /app
 
@@ -13,7 +13,6 @@ FROM debian:bookworm-slim
 WORKDIR /app
 
 COPY --from=builder /app/target/release/sensor-ingest .
-COPY .env .
 
 EXPOSE 8080
 

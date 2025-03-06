@@ -31,7 +31,7 @@ struct AppState {
 
 async fn insert_sensor_data(
     state: &web::Data<AppState>,
-     &IngestData,
+     data: &IngestData,
 ) -> Result<(), rusqlite::Error> {
     let now = Utc::now().to_rfc3339();
     let conn = state.db.lock().unwrap();
@@ -44,7 +44,7 @@ async fn insert_sensor_data(
 
 #[post("/ingest")]
 async fn ingest_data(
-     web::Json<IngestData>,
+    data: web::Json<IngestData>,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
     let ingest_data = data.into_inner();

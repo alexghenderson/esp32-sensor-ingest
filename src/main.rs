@@ -31,7 +31,7 @@ struct AppState {
 
 async fn insert_sensor_data(
     state: &web::Data<AppState>,
-    data: &IngestData,
+     &IngestData,
 ) -> Result<(), rusqlite::Error> {
     let now: DateTime<Utc> = Utc::now();
     let now_truncated = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
@@ -45,7 +45,7 @@ async fn insert_sensor_data(
 
 #[post("/ingest")]
 async fn ingest_data(
-    data: web::Json<IngestData>,
+     web::Json<IngestData>,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
     let ingest_data = data.into_inner();
@@ -123,6 +123,10 @@ async fn get_sensor_data(
         .await
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
+    if data.is_empty() {
+        return Ok(HttpResponse::NotFound().body("Sensor data not found"));
+    }
+
     Ok(HttpResponse::Ok().json(data))
 }
 
@@ -135,6 +139,10 @@ async fn get_sensor_data_by_field(
     let data = query_sensor_data(&state, &sensor_name, Some(&field))
         .await
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+
+   if data.is_empty() {
+        return Ok(HttpResponse::NotFound().body("Sensor data not found"));
+    }
 
     Ok(HttpResponse::Ok().json(data))
 }

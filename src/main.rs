@@ -4,7 +4,7 @@ use actix_web::{
 use chrono::Utc;
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use std::{sync::Mutex, env};
 
 #[derive(Debug, Deserialize)]
 struct IngestData {
@@ -138,7 +138,11 @@ async fn create_table(conn: &Connection) -> Result<()> {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let conn = Connection::open("sensor_data.db").expect("Failed to open database");
+    let db_path = env::var("DATABASE_URL").unwrap_or_else(|_| "data.db".to_string());
+
+    println!("Using database: {}", db_path);
+
+    let conn = Connection::open(&db_path).expect("Failed to open database");
     create_table(&conn).expect("Failed to create table");
 
     let app_state = web::Data::new(AppState {

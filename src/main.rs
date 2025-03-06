@@ -1,5 +1,5 @@
 use actix_web::{
-    get, post, web, App, Error, HttpResponse, HttpServer, Responder,
+    get, post, web, App, Error, HttpResponse, HttpServer,
 };
 use chrono::Utc;
 use rusqlite::{params, Connection, Result};
@@ -31,7 +31,7 @@ struct AppState {
 
 async fn insert_sensor_data(
     state: &web::Data<AppState>,
-      &IngestData,
+     &IngestData,
 ) -> Result<(), rusqlite::Error> {
     let now = Utc::now().to_rfc3339();
     let conn = state.db.lock().unwrap();
@@ -44,10 +44,10 @@ async fn insert_sensor_data(
 
 #[post("/ingest")]
 async fn ingest_data(
-      web::Json<IngestData>,
+     web::Json<IngestData>,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
-    insert_sensor_data(&state, &data)
+    insert_sensor_data(&state, &data.into_inner())
         .await
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
@@ -60,35 +60,29 @@ async fn query_sensor_data(
     field: Option<&str>,
 ) -> Result<Vec<SensorData>, rusqlite::Error> {
     let conn = state.db.lock().unwrap();
+
     let mut stmt = match field {
-        Some(field) => conn.prepare(
-            "SELECT timestamp, sensor_name, field, value, type FROM sensor_data WHERE sensor_name = ? AND field = ? ORDER BY timestamp DESC",
-        )?,
-        None => conn.prepare(
-            "SELECT timestamp, sensor_name, field, value, type FROM sensor_data WHERE sensor_name = ? ORDER BY timestamp DESC",
-        )?,
+        Some(field) => {
+            conn.prepare(
+                "SELECT timestamp, sensor_name, field, value, type FROM sensor_data WHERE sensor_name = ? AND field = ? ORDER BY timestamp DESC",
+            )?
+        }
+        None => {
+            conn.prepare(
+                "SELECT timestamp, sensor_name, field, value, type FROM sensor_data WHERE sensor_name = ? ORDER BY timestamp DESC",
+            )?
+        }
     };
 
-    let rows = match field {
-        Some(field) => stmt.query_map(params![sensor_name, field], |row| {
-            Ok(SensorData {
-                timestamp: row.get(0)?,
-                sensor_name: row.get(1)?,
-                field: row.get(2)?,
-                value: row.get(3)?,
-                data_type: row.get(4)?,
-            })
-        })?,
-        None => stmt.query_map(params![sensor_name], |row| {
-            Ok(SensorData {
-                timestamp: row.get(0)?,
-                sensor_name: row.get(1)?,
-                field: row.get(2)?,
-                value: row.get(3)?,
-                data_type: row.get(4)?,
-            })
-        })?,
-    };
+    let rows = stmt.query_map(params![sensor_name, field], |row| {
+        Ok(SensorData {
+            timestamp: row.get(0)?,
+            sensor_name: row.get(1)?,
+            field: row.get(2)?,
+            value: row.get(3)?,
+            data_type: row.get(4)?,
+        })
+    })?;
 
     rows.collect()
 }
@@ -143,7 +137,7 @@ async fn main() -> std::io::Result<()> {
     println!("Using database: {}", db_path);
 
     let conn = Connection::open(&db_path).expect("Failed to open database");
-    create_table(&conn).expect("Failed to create table");
+    create_table(&conn).await.expect("Failed to create table");
 
     let app_state = web::Data::new(AppState {
         db: Mutex::new(conn),
@@ -171,7 +165,7 @@ mod tests {
     #[actix_rt::test]
     async fn test_ingest_and_get_data() {
         let conn = Connection::open_in_memory().expect("Failed to open in-memory database");
-        create_table(&conn).expect("Failed to create table");
+        create_table(&conn).await.expect("Failed to create table");
 
         let app_state = web::Data::new(AppState {
             db: Mutex::new(conn),
@@ -215,7 +209,7 @@ mod tests {
         assert_eq!(body[0].data_type, "number");
 
         // Get data by field
-         let req = test::TestRequest::get().uri("/data/Test%20Sensor/temperature").to_request();
+        let req = test::TestRequest::get().uri("/data/Test%20Sensor/temperature").to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
 

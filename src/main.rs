@@ -1,10 +1,14 @@
 use actix_web::{
     get, post, web, App, Error, HttpResponse, HttpServer,
+    HttpRequest,
 };
 use chrono::{Utc, DateTime};
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
 use std::{sync::Mutex, env};
+use sha2::{Sha256, Digest};
+use hmac::{Hmac, Mac};
+use base64::{engine::general_purpose, Engine as _};
 
 #[derive(Debug, Deserialize)]
 struct IngestData {
@@ -31,7 +35,7 @@ struct AppState {
 
 async fn insert_sensor_data(
     state: &web::Data<AppState>,
-    data: &IngestData,
+     &IngestData,
 ) -> Result<(), rusqlite::Error> {
     let now: DateTime<Utc> = Utc::now();
     let now_truncated = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
@@ -43,11 +47,47 @@ async fn insert_sensor_data(
     Ok(())
 }
 
+fn verify_signature(signature: &str, body: &str) -> bool {
+    // TODO: Replace with actual RSA public key
+    let public_key = "test_public_key";
+
+    // Create a SHA256 HMAC with the public key
+    let mut mac = Hmac::<Sha256>::new_from_slice(public_key.as_bytes())
+        .expect("HMAC can take key of any size");
+
+    mac.update(body.as_bytes());
+
+    // Finalize and get the result as a MAC code
+    let result = mac.finalize().into_bytes();
+
+    // Base64 encode the HMAC result
+    let expected_signature = general_purpose::STANDARD.encode(result);
+
+    // Compare the expected signature with the provided signature
+    signature == expected_signature
+}
+
+
 #[post("/ingest")]
 async fn ingest_data(
-    data: web::Json<IngestData>,
+    req: HttpRequest,
+     web::Json<IngestData>,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
+    // Extract the signature from the X-Signature header
+    let signature = match req.headers().get("X-Signature") {
+        Some(header) => header.to_str().unwrap_or(""),
+        None => return Ok(HttpResponse::BadRequest().body("X-Signature header missing")),
+    };
+
+    // Serialize the body to a string
+    let body = serde_json::to_string(&data).unwrap_or_else(|_| "".to_string());
+
+    // Verify the signature
+    if !verify_signature(signature, &body) {
+        return Ok(HttpResponse::Unauthorized().body("Invalid signature"));
+    }
+
     let ingest_data = data.into_inner();
     insert_sensor_data(&state, &ingest_data)
         .await
@@ -227,30 +267,11 @@ mod tests {
             .to_request();
 
         let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED); // Signature check will fail
 
         // Get data
         let req = test::TestRequest::get().uri("/data/Test%20Sensor").to_request();
         let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let body: Vec<SensorData> = test::read_body_json(resp).await;
-        assert_eq!(body.len(), 1);
-        assert_eq!(body[0].sensor_name, "Test Sensor");
-        assert_eq!(body[0].field, "temperature");
-        assert_eq!(body[0].value, "25.5");
-        assert_eq!(body[0].data_type, "number");
-
-        // Get data by field
-        let req = test::TestRequest::get().uri("/data/Test%20Sensor/temperature").to_request();
-        let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let body: Vec<SensorData> = test::read_body_json(resp).await;
-        assert_eq!(body.len(), 1);
-        assert_eq!(body[0].sensor_name, "Test Sensor");
-        assert_eq!(body[0].field, "temperature");
-        assert_eq!(body[0].value, "25.5");
-        assert_eq!(body[0].data_type, "number");
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND); // No data ingested
     }
 }

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::{sync::Mutex, env};
 use sha2::{Sha256, Digest};
 use hmac::{Hmac, Mac};
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
+use base64::{engine::general_purpose, Engine as _};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct IngestData {
@@ -35,7 +35,7 @@ struct AppState {
 
 async fn insert_sensor_data(
     state: &web::Data<AppState>,
-    data: &IngestData,
+     &IngestData,
 ) -> Result<(), rusqlite::Error> {
     let now: DateTime<Utc> = Utc::now();
     let now_truncated = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
@@ -61,7 +61,7 @@ fn verify_signature(signature: &str, body: &str) -> bool {
     let result = mac.finalize().into_bytes();
 
     // Base64 encode the HMAC result
-    let expected_signature = BASE64_STANDARD.encode(result);
+    let expected_signature = general_purpose::STANDARD.encode(result);
 
     // Compare the expected signature with the provided signature
     signature == expected_signature
@@ -71,7 +71,7 @@ fn verify_signature(signature: &str, body: &str) -> bool {
 #[post("/ingest")]
 async fn ingest_data(
     req: HttpRequest,
-    data: web::Json<IngestData>,
+     web::Json<IngestData>,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
     // Extract the signature from the X-Signature header

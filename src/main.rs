@@ -6,7 +6,7 @@ use chrono::{Utc, DateTime};
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
 use std::{sync::Mutex, env};
-use sha2::{Sha256, Digest};
+use sha2::Sha256;
 use hmac::{Hmac, Mac};
 use base64::{engine::general_purpose, Engine as _};
 
@@ -35,7 +35,7 @@ struct AppState {
 
 async fn insert_sensor_data(
     state: &web::Data<AppState>,
-     &IngestData,
+    data: &IngestData,
 ) -> Result<(), rusqlite::Error> {
     let now: DateTime<Utc> = Utc::now();
     let now_truncated = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
@@ -49,7 +49,16 @@ async fn insert_sensor_data(
 
 fn verify_signature(signature: &str, body: &str) -> bool {
     // TODO: Replace with actual RSA public key
-    let public_key = "test_public_key";
+    let public_key = "-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5UkbcANIEG74125RTHyb
+q5/TyIj4xOgEGYJKGV/a0Z/kEo5hALJCMKmBm9NifwmfXrvNfSm/ZFKmp1pTuxlu
+HX9la7sIQelCGS1AAhMg+my/ZSnCpyFx3FY1hxfZt/aQDyfZs2xpXOJtpOqbrF2b
+ilHZcz9Ltwkyrtnf9FadoLOADQHJRt+zwHULAVsbs1DMxSHfy0miE2sQzOSOP8j/
+Ih2EwMae0fuR/qqpko7uD3/tSEEaEKQoQd6ZXYz+5pzmureOu1dVrqm/kSOO3h7e
+5Awrb0HAJoIH+Gp71Fd48U+8MQ1x1LDy2KfeZ1LD2IYRMYWz3zh8sQDy67VHGJMU
+zQIDAQAB
+-----END PUBLIC KEY-----
+";
 
     // Create a SHA256 HMAC with the public key
     let mut mac = Hmac::<Sha256>::new_from_slice(public_key.as_bytes())
@@ -71,7 +80,7 @@ fn verify_signature(signature: &str, body: &str) -> bool {
 #[post("/ingest")]
 async fn ingest_data(
     req: HttpRequest,
-     web::Json<IngestData>,
+    data: web::Json<IngestData>,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
     // Extract the signature from the X-Signature header

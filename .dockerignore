@@ -1,0 +1,11 @@
+# flyctl launch added from .gitignore
+**/.aider*
+
+**/data.db
+
+# Added by cargo
+
+target
+
+
+fly.toml

@@ -47,8 +47,8 @@ async fn ingest_data(
      web::Json<IngestData>,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
-    let data = data.into_inner();
-    insert_sensor_data(&state, &data)
+    let ingest_data = data.into_inner();
+    insert_sensor_data(&state, &ingest_data)
         .await
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 

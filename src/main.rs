@@ -73,7 +73,7 @@ async fn query_sensor_data(
 
     let mut stmt = conn.prepare(&sql)?;
 
-    let mut rows = match field {
+    let result: Result<Vec<SensorData>, rusqlite::Error> = match field {
         Some(field) => {
             let mut rows = stmt.query_map(params![sensor_name, field], |row| {
                 Ok(SensorData {
@@ -85,10 +85,10 @@ async fn query_sensor_data(
                 })
             })?;
             let mut result = Vec::new();
-            while let Some(row) = rows.next()? {
+            while let Some(row) = rows.next().transpose()? {
                 result.push(row);
             }
-            result
+            Ok(result)
         }
         None => {
             let mut rows = stmt.query_map(params![sensor_name], |row| {
@@ -101,14 +101,14 @@ async fn query_sensor_data(
                 })
             })?;
             let mut result = Vec::new();
-            while let Some(row) = rows.next()? {
+            while let Some(row) = rows.next().transpose()? {
                 result.push(row);
             }
-            result
+            Ok(result)
         }
     };
 
-    Ok(rows)
+    result
 }
 
 

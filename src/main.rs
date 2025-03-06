@@ -7,7 +7,14 @@ use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
 use std::{sync::Mutex, env};
 use sha2::Sha256;
-use hmac::{Hmac, Mac};
+use rsa::{
+    pkcs8::DecodePublicKey,
+    PublicKey,
+    sha2::Digest,
+    Signature,
+    pkcs8::EncodePublicKey,
+};
+use rsa::signature::{Verifier, SignatureEncoding};
 use base64::{engine::general_purpose, Engine as _};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -35,7 +42,7 @@ struct AppState {
 
 async fn insert_sensor_data(
     state: &web::Data<AppState>,
-    data: &IngestData,
+     &IngestData,
 ) -> Result<(), rusqlite::Error> {
     let now: DateTime<Utc> = Utc::now();
     let now_truncated = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
@@ -48,8 +55,8 @@ async fn insert_sensor_data(
 }
 
 fn verify_signature(signature: &str, body: &str) -> bool {
-    // TODO: Replace with actual RSA public key
-    let public_key = "-----BEGIN PUBLIC KEY-----
+    // Public key in PEM format
+    let public_key_pem = "-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5UkbcANIEG74125RTHyb
 q5/TyIj4xOgEGYJKGV/a0Z/kEo5hALJCMKmBm9NifwmfXrvNfSm/ZFKmp1pTuxlu
 HX9la7sIQelCGS1AAhMg+my/ZSnCpyFx3FY1hxfZt/aQDyfZs2xpXOJtpOqbrF2b
@@ -57,30 +64,54 @@ ilHZcz9Ltwkyrtnf9FadoLOADQHJRt+zwHULAVsbs1DMxSHfy0miE2sQzOSOP8j/
 Ih2EwMae0fuR/qqpko7uD3/tSEEaEKQoQd6ZXYz+5pzmureOu1dVrqm/kSOO3h7e
 5Awrb0HAJoIH+Gp71Fd48U+8MQ1x1LDy2KfeZ1LD2IYRMYWz3zh8sQDy67VHGJMU
 zQIDAQAB
------END PUBLIC KEY-----
-";
+-----END PUBLIC KEY-----";
 
-    // Create a SHA256 HMAC with the public key
-    let mut mac = Hmac::<Sha256>::new_from_slice(public_key.as_bytes())
-        .expect("HMAC can take key of any size");
+    // Decode the PEM-encoded public key
+    let public_key = rsa::RsaPublicKey::from_pkcs8_pem(public_key_pem);
 
-    mac.update(body.as_bytes());
+    match public_key {
+        Ok(public_key) => {
+            // Decode the base64-encoded signature
+            let decoded_signature = general_purpose::STANDARD.decode(signature);
 
-    // Finalize and get the result as a MAC code
-    let result = mac.finalize().into_bytes();
+            match decoded_signature {
+                Ok(decoded_signature) => {
+                    // Hash the message
+                    let mut hasher = Sha256::new();
+                    hasher.update(body.as_bytes());
+                    let digest = hasher.finalize();
 
-    // Base64 encode the HMAC result
-    let expected_signature = general_purpose::STANDARD.encode(result);
+                    // Verify the signature
+                    let signature = rsa::signature::Signature::from_bytes(&decoded_signature);
 
-    // Compare the expected signature with the provided signature
-    signature == expected_signature
+                    match signature {
+                        Ok(signature) => {
+                            public_key.verify(rsa::signature::Digest::new(digest), &signature).is_ok()
+                        }
+                        Err(_) => {
+                            println!("Failed to decode signature");
+                            false
+                        }
+                    }
+                }
+                Err(_) => {
+                    println!("Failed to decode base64 signature");
+                    false
+                }
+            }
+        }
+        Err(_) => {
+            println!("Failed to decode public key");
+            false
+        }
+    }
 }
 
 
 #[post("/ingest")]
 async fn ingest_data(
     req: HttpRequest,
-    data: web::Json<IngestData>,
+     web::Json<IngestData>,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
     // Extract the signature from the X-Signature header

@@ -5,6 +5,9 @@ use chrono::Utc;
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
 use std::{sync::Mutex, env};
+use actix_web::dev::ServiceRequest;
+use actix_web::dev::ServiceResponse;
+use actix_web::Error as ActixError;
 
 #[derive(Debug, Deserialize)]
 struct IngestData {
@@ -47,7 +50,8 @@ async fn ingest_data(
      web::Json<IngestData>,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
-    insert_sensor_data(&state, &data.into_inner())
+    let data = data.into_inner();
+    insert_sensor_data(&state, &data)
         .await
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
@@ -61,30 +65,43 @@ async fn query_sensor_data(
 ) -> Result<Vec<SensorData>, rusqlite::Error> {
     let conn = state.db.lock().unwrap();
 
-    let mut stmt = match field {
-        Some(field) => {
-            conn.prepare(
-                "SELECT timestamp, sensor_name, field, value, type FROM sensor_data WHERE sensor_name = ? AND field = ? ORDER BY timestamp DESC",
-            )?
+    let sql = match field {
+        Some(_field) => {
+            "SELECT timestamp, sensor_name, field, value, type FROM sensor_data WHERE sensor_name = ? AND field = ? ORDER BY timestamp DESC".to_string()
         }
         None => {
-            conn.prepare(
-                "SELECT timestamp, sensor_name, field, value, type FROM sensor_data WHERE sensor_name = ? ORDER BY timestamp DESC",
-            )?
+            "SELECT timestamp, sensor_name, field, value, type FROM sensor_data WHERE sensor_name = ? ORDER BY timestamp DESC".to_string()
         }
     };
 
-    let rows = stmt.query_map(params![sensor_name, field], |row| {
-        Ok(SensorData {
-            timestamp: row.get(0)?,
-            sensor_name: row.get(1)?,
-            field: row.get(2)?,
-            value: row.get(3)?,
-            data_type: row.get(4)?,
-        })
-    })?;
+    let mut stmt = conn.prepare(&sql)?;
 
-    rows.collect()
+    let rows = match field {
+        Some(field) => {
+            stmt.query_map(params![sensor_name, field], |row| {
+                Ok(SensorData {
+                    timestamp: row.get(0)?,
+                    sensor_name: row.get(1)?,
+                    field: row.get(2)?,
+                    value: row.get(3)?,
+                    data_type: row.get(4)?,
+                })
+            })?.collect::<Result<Vec<_>, _>>()?
+        }
+        None => {
+            stmt.query_map(params![sensor_name], |row| {
+                Ok(SensorData {
+                    timestamp: row.get(0)?,
+                    sensor_name: row.get(1)?,
+                    field: row.get(2)?,
+                    value: row.get(3)?,
+                    data_type: row.get(4)?,
+                })
+            })?.collect::<Result<Vec<_>, _>>()?
+        }
+    };
+
+    Ok(rows)
 }
 
 
@@ -129,6 +146,12 @@ async fn create_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+async fn init_db(db_path: String) -> Result<Connection, rusqlite::Error> {
+    let conn = Connection::open(&db_path)?;
+    create_table(&conn).await?;
+    Ok(conn)
+}
+
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -136,8 +159,7 @@ async fn main() -> std::io::Result<()> {
 
     println!("Using database: {}", db_path);
 
-    let conn = Connection::open(&db_path).expect("Failed to open database");
-    create_table(&conn).await.expect("Failed to create table");
+    let conn = init_db(db_path.clone()).await.expect("Failed to initialize database");
 
     let app_state = web::Data::new(AppState {
         db: Mutex::new(conn),
@@ -159,7 +181,7 @@ async fn main() -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::{test, web, App};
+    use actix_web::{test, web, App, http::StatusCode};
     use serde_json::json;
 
     #[actix_rt::test]
@@ -194,12 +216,12 @@ mod tests {
             .to_request();
 
         let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), 200);
+        assert_eq!(resp.status(), StatusCode::OK);
 
         // Get data
         let req = test::TestRequest::get().uri("/data/Test%20Sensor").to_request();
         let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), 200);
+        assert_eq!(resp.status(), StatusCode::OK);
 
         let body: Vec<SensorData> = test::read_body_json(resp).await;
         assert_eq!(body.len(), 1);
@@ -211,7 +233,7 @@ mod tests {
         // Get data by field
         let req = test::TestRequest::get().uri("/data/Test%20Sensor/temperature").to_request();
         let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), 200);
+        assert_eq!(resp.status(), StatusCode::OK);
 
         let body: Vec<SensorData> = test::read_body_json(resp).await;
         assert_eq!(body.len(), 1);

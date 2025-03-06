@@ -31,10 +31,10 @@ struct AppState {
 
 async fn insert_sensor_data(
     state: &web::Data<AppState>,
-    data: &IngestData,
+     &IngestData,
 ) -> Result<(), rusqlite::Error> {
     let now: DateTime<Utc> = Utc::now();
-    let now_truncated = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let now_truncated = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
     let conn = state.db.lock().unwrap();
     conn.execute(
         "INSERT INTO sensor_data (timestamp, sensor_name, field, value, type) VALUES (?, ?, ?, ?, ?)",
@@ -45,7 +45,7 @@ async fn insert_sensor_data(
 
 #[post("/ingest")]
 async fn ingest_data(
-    data: web::Json<IngestData>,
+     web::Json<IngestData>,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
     let ingest_data = data.into_inner();

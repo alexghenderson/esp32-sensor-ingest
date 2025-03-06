@@ -35,7 +35,7 @@ struct AppState {
 
 async fn insert_sensor_data(
     state: &web::Data<AppState>,
-     &IngestData,
+    data: &IngestData,
 ) -> Result<(), rusqlite::Error> {
     let now: DateTime<Utc> = Utc::now();
     let now_truncated = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
@@ -71,7 +71,7 @@ fn verify_signature(signature: &str, body: &str) -> bool {
 #[post("/ingest")]
 async fn ingest_data(
     req: HttpRequest,
-     web::Json<IngestData>,
+    data: web::Json<IngestData>,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
     // Extract the signature from the X-Signature header

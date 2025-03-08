@@ -3,18 +3,13 @@ use actix_web::{
     HttpRequest,
 };
 use chrono::{Utc, DateTime};
+use rsa::Pkcs1v15Sign;
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
 use std::{sync::Mutex, env};
-use sha2::Sha256;
-use rsa::{
-    pkcs8::DecodePublicKey,
-    PublicKey,
-    sha2::Digest,
-    Signature,
-    pkcs8::EncodePublicKey,
-};
-use rsa::signature::{Verifier, SignatureEncoding};
+// use sha2::{Sha256, Digest};
+use rsa::pkcs8::DecodePublicKey;
+use rsa::sha2::{Digest, Sha256};
 use base64::{engine::general_purpose, Engine as _};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,7 +37,7 @@ struct AppState {
 
 async fn insert_sensor_data(
     state: &web::Data<AppState>,
-     &IngestData,
+    data: &IngestData,
 ) -> Result<(), rusqlite::Error> {
     let now: DateTime<Utc> = Utc::now();
     let now_truncated = now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
@@ -66,13 +61,13 @@ Ih2EwMae0fuR/qqpko7uD3/tSEEaEKQoQd6ZXYz+5pzmureOu1dVrqm/kSOO3h7e
 zQIDAQAB
 -----END PUBLIC KEY-----";
 
-    // Decode the PEM-encoded public key
-    let public_key = rsa::RsaPublicKey::from_pkcs8_pem(public_key_pem);
+
+    let public_key = rsa::RsaPublicKey::from_public_key_pem(&public_key_pem);
 
     match public_key {
         Ok(public_key) => {
             // Decode the base64-encoded signature
-            let decoded_signature = general_purpose::STANDARD.decode(signature);
+            let decoded_signature = hex::decode(signature);
 
             match decoded_signature {
                 Ok(decoded_signature) => {
@@ -80,16 +75,22 @@ zQIDAQAB
                     let mut hasher = Sha256::new();
                     hasher.update(body.as_bytes());
                     let digest = hasher.finalize();
+                    let decoded_hash = hex::encode(digest.as_slice());
+                    println!("Decoded Digest: {:?}", decoded_hash);
+                    println!("Decoded Signature: {:?}", decoded_signature);
+                    let padding = Pkcs1v15Sign::new::<Sha256>();
+                    let verification_result = public_key.verify(
+                        padding,
+                        &digest[..], // Pass the hashed message as a slice
+                        decoded_signature.as_slice(),
+                    );
 
-                    // Verify the signature
-                    let signature = rsa::signature::Signature::from_bytes(&decoded_signature);
-
-                    match signature {
-                        Ok(signature) => {
-                            public_key.verify(rsa::signature::Digest::new(digest), &signature).is_ok()
+                    match verification_result {
+                        Ok(_) => {
+                            true
                         }
-                        Err(_) => {
-                            println!("Failed to decode signature");
+                        Err(error) => {
+                            println!("{:?}", error);
                             false
                         }
                     }
@@ -111,7 +112,7 @@ zQIDAQAB
 #[post("/ingest")]
 async fn ingest_data(
     req: HttpRequest,
-     web::Json<IngestData>,
+    data: web::Json<IngestData>,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
     // Extract the signature from the X-Signature header
